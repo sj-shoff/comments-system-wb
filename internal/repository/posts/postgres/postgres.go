@@ -9,3 +9,10 @@ type PostsRepository struct {
 	db      *dbpg.DB
 	retries retry.Strategy
 }
+
+func NewPostsRepository(db *dbpg.DB, retries retry.Strategy) *PostsRepository {
+	return &PostsRepository{
+		db:      db,
+		retries: retries,
+	}
+}

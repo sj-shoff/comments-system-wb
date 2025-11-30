@@ -1,1 +1,15 @@
 package comments
+
+import "errors"
+
+var (
+	ErrInvalidCommentID = errors.New("invalid comment ID")
+	ErrCommentNotFound  = errors.New("comment not found")
+	ErrInvalidParentID  = errors.New("invalid parent ID")
+	ErrInvalidPage      = errors.New("invalid page number")
+	ErrInvalidPageSize  = errors.New("invalid page size")
+	ErrContentRequired  = errors.New("content is required")
+	ErrAuthorRequired   = errors.New("author is required")
+	ErrContentTooLong   = errors.New("content is too long")
+	ErrAuthorTooLong    = errors.New("author is too long")
+)
