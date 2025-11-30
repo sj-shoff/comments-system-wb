@@ -9,21 +9,21 @@ import (
 	"github.com/wb-go/wbf/zlog"
 )
 
-type postsUsecase struct {
+type PostsUsecase struct {
 	repo   postsRepo
 	cache  postsCache
 	logger *zlog.Zerolog
 }
 
-func NewPostsUsecase(repo postsRepo, cache postsCache, logger *zlog.Zerolog) *postsUsecase {
-	return &postsUsecase{
+func NewPostsUsecase(repo postsRepo, cache postsCache, logger *zlog.Zerolog) *PostsUsecase {
+	return &PostsUsecase{
 		repo:   repo,
 		cache:  cache,
 		logger: logger,
 	}
 }
 
-func (u *postsUsecase) CreatePost(ctx context.Context, post domain.Post) (domain.Post, error) {
+func (u *PostsUsecase) CreatePost(ctx context.Context, post domain.Post) (domain.Post, error) {
 	if post.Title == "" {
 		return domain.Post{}, ErrTitleRequired
 	}
@@ -67,7 +67,7 @@ func (u *postsUsecase) CreatePost(ctx context.Context, post domain.Post) (domain
 	return createdPost, nil
 }
 
-func (u *postsUsecase) GetPosts(ctx context.Context, page, pageSize int, searchQuery, sortBy, sortOrder string) (domain.PostTree, error) {
+func (u *PostsUsecase) GetPosts(ctx context.Context, page, pageSize int, searchQuery, sortBy, sortOrder string) (domain.PostTree, error) {
 	cachedPosts, totalCount, err := u.cache.GetPosts(ctx, page, pageSize, searchQuery, sortBy, sortOrder)
 	if err == nil {
 		return domain.PostTree{
@@ -80,13 +80,26 @@ func (u *postsUsecase) GetPosts(ctx context.Context, page, pageSize int, searchQ
 		}, nil
 	}
 
-	if err != nil {
-		u.logger.Warn().Err(err).Msg("Cache error, falling back to DB")
-	}
+	u.logger.Warn().Err(err).Msg("Cache miss for posts, querying DB")
 
 	posts, totalCount, err := u.repo.GetAll(ctx, page, pageSize, searchQuery, sortBy, sortOrder)
 	if err != nil {
 		return domain.PostTree{}, err
+	}
+
+	for i := range posts {
+		count, countErr := u.cache.GetCommentsCount(ctx, posts[i].ID)
+		if countErr != nil {
+			count, countErr = u.repo.GetCommentsCount(ctx, posts[i].ID)
+			if countErr != nil {
+				u.logger.Warn().Err(countErr).Int("post_id", posts[i].ID).Msg("Failed to get comments count")
+				count = 0
+			}
+			if err := u.cache.SetCommentsCount(ctx, posts[i].ID, count); err != nil {
+				u.logger.Warn().Err(err).Int("post_id", posts[i].ID).Msg("Failed to cache comments count")
+			}
+		}
+		posts[i].CommentsCount = count
 	}
 
 	go func() {
@@ -105,20 +118,31 @@ func (u *postsUsecase) GetPosts(ctx context.Context, page, pageSize int, searchQ
 	}, nil
 }
 
-func (u *postsUsecase) GetPostByID(ctx context.Context, id int) (domain.Post, error) {
+func (u *PostsUsecase) GetPostByID(ctx context.Context, id int) (domain.Post, error) {
 	cachedPost, err := u.cache.GetPost(ctx, id)
 	if err == nil {
 		return cachedPost, nil
 	}
 
-	if err != nil {
-		u.logger.Warn().Err(err).Int("post_id", id).Msg("Cache error, falling back to DB")
-	}
+	u.logger.Warn().Err(err).Int("post_id", id).Msg("Cache miss for post, querying DB")
 
 	post, err := u.repo.GetByID(ctx, id)
 	if err != nil {
 		return domain.Post{}, err
 	}
+
+	count, countErr := u.cache.GetCommentsCount(ctx, id)
+	if countErr != nil {
+		count, countErr = u.repo.GetCommentsCount(ctx, id)
+		if countErr != nil {
+			u.logger.Warn().Err(countErr).Int("post_id", id).Msg("Failed to get comments count")
+			count = 0
+		}
+		if err := u.cache.SetCommentsCount(ctx, id, count); err != nil {
+			u.logger.Warn().Err(err).Int("post_id", id).Msg("Failed to cache comments count")
+		}
+	}
+	post.CommentsCount = count
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -129,7 +153,7 @@ func (u *postsUsecase) GetPostByID(ctx context.Context, id int) (domain.Post, er
 	return post, nil
 }
 
-func (u *postsUsecase) DeletePost(ctx context.Context, id int) error {
+func (u *PostsUsecase) DeletePost(ctx context.Context, id int) error {
 	if id <= 0 {
 		return ErrInvalidPostID
 	}

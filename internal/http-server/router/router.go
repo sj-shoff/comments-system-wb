@@ -17,10 +17,27 @@ type Handler struct {
 func SetupRouter(h *Handler) http.Handler {
 	r := chi.NewRouter()
 
-	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("OK"))
 	})
+
+	r.Route("/comments", func(r chi.Router) {
+		r.Post("/", h.CommentsHandler.CreateComment)
+		r.Get("/", h.CommentsHandler.GetComments)
+		r.Delete("/{id}", h.CommentsHandler.DeleteComment)
+	})
+
+	r.Route("/posts", func(r chi.Router) {
+		r.Post("/", h.PostsHandler.CreatePost)
+		r.Get("/", h.PostsHandler.GetPosts)
+		r.Get("/{id}", h.PostsHandler.GetPostByID)
+		r.Delete("/{id}", h.PostsHandler.DeletePost)
+	})
+
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "templates/index.html")
+	})
+	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
 
 	return r
 }

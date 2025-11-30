@@ -58,15 +58,7 @@ func (h *PostsHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := dto.PostResponse{
-		ID:            createdPost.ID,
-		Title:         createdPost.Title,
-		Content:       createdPost.Content,
-		Author:        createdPost.Author,
-		CreatedAt:     createdPost.CreatedAt,
-		UpdatedAt:     createdPost.UpdatedAt,
-		CommentsCount: createdPost.CommentsCount,
-	}
+	resp := dto.FromDomainPost(createdPost)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -102,14 +94,7 @@ func (h *PostsHandler) GetPosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := dto.PostsResponse{
-		Posts:    convertToResponse(tree.Posts),
-		Total:    tree.Total,
-		Page:     tree.Page,
-		PageSize: tree.PageSize,
-		HasNext:  tree.HasNext,
-		HasPrev:  tree.HasPrev,
-	}
+	resp := dto.FromDomainPostsTree(tree)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -139,15 +124,7 @@ func (h *PostsHandler) GetPostByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := dto.PostResponse{
-		ID:            post.ID,
-		Title:         post.Title,
-		Content:       post.Content,
-		Author:        post.Author,
-		CreatedAt:     post.CreatedAt,
-		UpdatedAt:     post.UpdatedAt,
-		CommentsCount: post.CommentsCount,
-	}
+	resp := dto.FromDomainPost(post)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -178,20 +155,4 @@ func (h *PostsHandler) DeletePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func convertToResponse(posts []domain.Post) []dto.PostResponse {
-	responses := make([]dto.PostResponse, len(posts))
-	for i, post := range posts {
-		responses[i] = dto.PostResponse{
-			ID:            post.ID,
-			Title:         post.Title,
-			Content:       post.Content,
-			Author:        post.Author,
-			CreatedAt:     post.CreatedAt,
-			UpdatedAt:     post.UpdatedAt,
-			CommentsCount: post.CommentsCount,
-		}
-	}
-	return responses
 }

@@ -9,21 +9,21 @@ import (
 	"github.com/wb-go/wbf/zlog"
 )
 
-type commentsUsecase struct {
+type CommentsUsecase struct {
 	repo   сommentsRepo
 	cache  commentsCache
 	logger *zlog.Zerolog
 }
 
-func NewCommentsUsecase(repo сommentsRepo, cache commentsCache, logger *zlog.Zerolog) *commentsUsecase {
-	return &commentsUsecase{
+func NewCommentsUsecase(repo сommentsRepo, cache commentsCache, logger *zlog.Zerolog) *CommentsUsecase {
+	return &CommentsUsecase{
 		repo:   repo,
 		cache:  cache,
 		logger: logger,
 	}
 }
 
-func (u *commentsUsecase) CreateComment(ctx context.Context, comment domain.Comment) (domain.Comment, error) {
+func (u *CommentsUsecase) CreateComment(ctx context.Context, comment domain.Comment) (domain.Comment, error) {
 	if comment.Content == "" {
 		return domain.Comment{}, ErrContentRequired
 	}
@@ -65,59 +65,63 @@ func (u *commentsUsecase) CreateComment(ctx context.Context, comment domain.Comm
 	return createdComment, nil
 }
 
-func (u *commentsUsecase) GetComments(ctx context.Context, parentID *int, page, pageSize int, searchQuery, sortBy, sortOrder string) (domain.CommentTree, error) {
-
+func (u *CommentsUsecase) GetComments(ctx context.Context, parentID *int, page, pageSize int, searchQuery, sortBy, sortOrder string) (domain.CommentTree, error) {
 	if parentID != nil {
-		cachedTree, err := u.cache.GetCommentTree(ctx, *parentID)
-		if err == nil && cachedTree != nil {
-			return domain.CommentTree{
-				Comments: cachedTree,
-				Total:    len(cachedTree),
-				Page:     1,
-				PageSize: len(cachedTree),
-				HasNext:  false,
-				HasPrev:  false,
-			}, nil
-		}
-
-		tree, err := u.repo.GetTree(ctx, *parentID)
+		parent, err := u.repo.GetByID(ctx, *parentID)
 		if err != nil {
 			return domain.CommentTree{}, err
 		}
 
-		if err := u.cache.SetCommentTree(ctx, *parentID, tree); err != nil {
-			u.logger.Warn().Err(err).Int("parent_id", *parentID).Msg("Failed to cache comment tree")
+		children, err := u.cache.GetCommentTree(ctx, *parentID)
+		if err != nil {
+			children, err = u.repo.GetTree(ctx, *parentID)
+			if err != nil {
+				return domain.CommentTree{}, err
+			}
+			if err := u.cache.SetCommentTree(ctx, *parentID, children); err != nil {
+				u.logger.Warn().Err(err).Int("parent_id", *parentID).Msg("Failed to cache comment tree")
+			}
 		}
 
+		parent.Children = children
 		return domain.CommentTree{
-			Comments: tree,
-			Total:    len(tree),
+			Comments: []domain.Comment{parent},
+			Total:    1,
 			Page:     1,
-			PageSize: len(tree),
+			PageSize: 1,
 			HasNext:  false,
 			HasPrev:  false,
 		}, nil
 	}
 
-	cachedComments, totalCount, err := u.cache.GetComments(ctx, parentID, page, pageSize, searchQuery, sortBy, sortOrder)
-	if err == nil && cachedComments != nil {
-		return domain.CommentTree{
-			Comments: cachedComments,
-			Total:    totalCount,
-			Page:     page,
-			PageSize: pageSize,
-			HasNext:  (page * pageSize) < totalCount,
-			HasPrev:  page > 1,
-		}, nil
-	}
-
-	comments, totalCount, err := u.repo.GetByParent(ctx, parentID, page, pageSize, searchQuery, sortBy, sortOrder)
+	comments, totalCount, err := u.cache.GetComments(ctx, parentID, page, pageSize, searchQuery, sortBy, sortOrder)
 	if err != nil {
-		return domain.CommentTree{}, err
-	}
+		u.logger.Warn().Err(err).Msg("Cache miss for comments, querying DB")
+		comments, totalCount, err = u.repo.GetByParent(ctx, parentID, page, pageSize, searchQuery, sortBy, sortOrder)
+		if err != nil {
+			return domain.CommentTree{}, err
+		}
 
-	if err := u.cache.SetComments(ctx, parentID, page, pageSize, searchQuery, sortBy, sortOrder, comments, totalCount); err != nil {
-		u.logger.Warn().Err(err).Msg("Failed to cache comments")
+		if searchQuery == "" {
+			for i := range comments {
+				childComments, childErr := u.cache.GetCommentTree(ctx, comments[i].ID)
+				if childErr != nil {
+					childComments, childErr = u.repo.GetTree(ctx, comments[i].ID)
+					if childErr != nil {
+						u.logger.Warn().Err(childErr).Int("comment_id", comments[i].ID).Msg("Failed to get subtree")
+						continue
+					}
+					if err := u.cache.SetCommentTree(ctx, comments[i].ID, childComments); err != nil {
+						u.logger.Warn().Err(err).Int("comment_id", comments[i].ID).Msg("Failed to cache subtree")
+					}
+				}
+				comments[i].Children = childComments
+			}
+		}
+
+		if err := u.cache.SetComments(ctx, parentID, page, pageSize, searchQuery, sortBy, sortOrder, comments, totalCount); err != nil {
+			u.logger.Warn().Err(err).Msg("Failed to set comments in cache")
+		}
 	}
 
 	return domain.CommentTree{
@@ -130,7 +134,7 @@ func (u *commentsUsecase) GetComments(ctx context.Context, parentID *int, page, 
 	}, nil
 }
 
-func (u *commentsUsecase) DeleteComment(ctx context.Context, id int) error {
+func (u *CommentsUsecase) DeleteComment(ctx context.Context, id int) error {
 	if id <= 0 {
 		return ErrInvalidCommentID
 	}
@@ -143,13 +147,13 @@ func (u *commentsUsecase) DeleteComment(ctx context.Context, id int) error {
 		return ErrCommentNotFound
 	}
 
-	var parentID *int
-	comment, err := u.repo.GetTree(ctx, id)
-	if err == nil && len(comment) > 0 {
-		parentID = comment[0].ParentID
+	parent, err := u.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
 	}
 
-	if err := u.repo.Delete(ctx, id); err != nil {
+	err = u.repo.Delete(ctx, id)
+	if err != nil {
 		return err
 	}
 
@@ -157,13 +161,13 @@ func (u *commentsUsecase) DeleteComment(ctx context.Context, id int) error {
 		u.logger.Warn().Err(err).Int("comment_id", id).Msg("Failed to invalidate comment tree cache")
 	}
 
-	if parentID != nil {
-		if err := u.cache.InvalidateCommentTree(ctx, *parentID); err != nil {
-			u.logger.Warn().Err(err).Int("parent_id", *parentID).Msg("Failed to invalidate parent comment tree cache")
+	if parent.ParentID != nil {
+		if err := u.cache.InvalidateCommentTree(ctx, *parent.ParentID); err != nil {
+			u.logger.Warn().Err(err).Int("parent_id", *parent.ParentID).Msg("Failed to invalidate parent comment tree cache")
 		}
 	}
 
-	if err := u.cache.InvalidateComments(ctx, parentID); err != nil {
+	if err := u.cache.InvalidateComments(ctx, parent.ParentID); err != nil {
 		u.logger.Warn().Err(err).Msg("Failed to invalidate comments cache")
 	}
 
