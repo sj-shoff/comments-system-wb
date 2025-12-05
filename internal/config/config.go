@@ -20,12 +20,7 @@ type Config struct {
 		MaxIdleConns    int           `env:"DB_MAX_IDLE_CONNS"`
 		ConnMaxLifetime time.Duration `env:"DB_CONN_MAX_LIFETIME"`
 	}
-	Redis struct {
-		Host string `env:"REDIS_HOST" validate:"required"`
-		Port int    `env:"REDIS_PORT" validate:"required"`
-		Pass string `env:"REDIS_PASSWORD"`
-		DB   int    `env:"REDIS_DB"`
-	}
+
 	Server struct {
 		Addr            string        `env:"SERVER_PORT" validate:"required"`
 		ReadTimeout     time.Duration `env:"SERVER_READ_TIMEOUT" validate:"required"`
@@ -33,6 +28,7 @@ type Config struct {
 		IdleTimeout     time.Duration `env:"SERVER_IDLE_TIMEOUT" validate:"required"`
 		ShutdownTimeout time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" validate:"required"`
 	}
+
 	Retries struct {
 		Attempts int     `env:"RETRIES_ATTEMPTS" validate:"required"`
 		DelayMs  int     `env:"RETRIES_DELAY_MS" validate:"required"`
@@ -59,10 +55,6 @@ func MustLoad() (*Config, error) {
 func (c *Config) DBDSN() string {
 	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
 		c.DB.User, c.DB.Pass, c.DB.Host, c.DB.Port, c.DB.DBName)
-}
-
-func (c *Config) RedisAddr() string {
-	return fmt.Sprintf("%s:%d", c.Redis.Host, c.Redis.Port)
 }
 
 func (c *Config) DefaultRetryStrategy() retry.Strategy {
